@@ -1,6 +1,7 @@
 extern crate specs;
 
-use specs::{Component, VecStorage, ReadStorage, RunNow, System, World};
+use specs::{Component, DispatcherBuilder, VecStorage, ReadStorage, WriteStorage, System, World};
+use std::{thread, time};
 
 #[derive(Debug)]
 struct Position {
@@ -36,6 +37,23 @@ impl<'a> System<'a> for LoggingSystem {
     }
 }
 
+struct UpdatePositionSystem;
+
+impl<'a> System<'a> for UpdatePositionSystem {
+    type SystemData = (ReadStorage<'a, Velocity>, WriteStorage<'a, Position>);
+
+    fn run(&mut self, data: Self::SystemData) {
+        use specs::Join;
+
+        let (vel, mut pos) = data;
+
+        for (vel, pos) in (&vel, &mut pos).join() {
+            pos.x += vel.x * 0.05;
+            pos.y += vel.y * 0.05;
+        }
+    }
+}
+
 fn main() {
     let mut world = World::new();
     world.register::<Position>();
@@ -47,5 +65,16 @@ fn main() {
         .build();
 
     let mut logging_system = LoggingSystem;
-    logging_system.run_now(&world.res);
+    let mut update_position_system = UpdatePositionSystem;
+
+    let mut dispatcher = DispatcherBuilder::new()
+        .add(logging_system, "logging_system", &[])
+        .add(update_position_system, "update_position_system", &["logging_system"])
+        .build();
+
+    let sleep_duration = time::Duration::from_millis(1000);
+    loop {
+        dispatcher.dispatch(&mut world.res);
+        thread::sleep(sleep_duration);
+    }
 }
