@@ -83,7 +83,10 @@ impl<'a> System<'a> for RenderSystem {
             graphics::clear(white, gl);
 
             for (rotation, sprite) in (&rotation, &sprite).join() {
-                let transform = context.transform.rot_rad(rotation.radians);
+                let transform = context.transform
+                    .trans((render_args.width / 2) as f64, (render_args.height / 2) as f64)
+                    .rot_rad(rotation.radians)
+                    .trans(-(sprite.image.rectangle.unwrap()[2] / 2.0), -(sprite.image.rectangle.unwrap()[3] / 2.0));
 
                 sprite.image.draw(&sprite.texture, &draw_state::DrawState::default(), transform, gl);
             }
@@ -121,7 +124,7 @@ fn main() {
             radians: 2.0
         })
         .with(Sprite {
-            image: graphics::Image::new().rect(graphics::rectangle::square(100.0, 100.0, 145.0)),
+            image: graphics::Image::new().rect(graphics::rectangle::square(0.0, 0.0, 145.0)),
             texture: texture
         })
         .build();
