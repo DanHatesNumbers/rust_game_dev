@@ -1,98 +1,166 @@
 extern crate specs;
-extern crate time;
+extern crate piston;
+extern crate graphics;
+extern crate glutin_window;
+extern crate opengl_graphics;
 
-use specs::{Component, DispatcherBuilder, Fetch, VecStorage, ReadStorage, WriteStorage, System, World};
-use std::{thread};
+use specs::{Component, DispatcherBuilder, Fetch, FetchMut, VecStorage, ReadStorage, WriteStorage, System, World};
+use std::path;
+use std::f64::consts::PI as PI;
 
+use piston::window::WindowSettings;
+use piston::event_loop::*;
+use piston::input::*;
+use glutin_window::GlutinWindow as Window;
+use opengl_graphics::{GlGraphics, OpenGL, Texture};
 
 #[derive(Debug)]
-struct Position {
-    x: f64,
-    y: f64
+struct Rotation {
+    radians: f64
 }
 
-impl Component for Position {
-    type Storage = VecStorage<Position>;
+impl Component for Rotation {
+    type Storage = VecStorage<Rotation>;
 }
 
 #[derive(Debug)]
-struct Velocity {
-    x: f64,
-    y: f64
+struct RotationalVelocity {
+    radians: f64
 }
 
-impl Component for Velocity {
-    type Storage = VecStorage<Velocity>;
+impl Component for RotationalVelocity {
+    type Storage = VecStorage<RotationalVelocity>;
 }
 
-struct LoggingSystem;
+struct Sprite {
+    image: graphics::Image,
+    texture: Texture
+}
 
-impl<'a> System<'a> for LoggingSystem {
-    type SystemData = ReadStorage<'a, Position>;
+impl Component for Sprite {
+    type Storage = VecStorage<Sprite>;
+}
+
+struct UpdateRotationSystem;
+
+impl<'a> System<'a> for UpdateRotationSystem {
+    type SystemData = (Fetch<'a, UpdateArgs>,
+        ReadStorage<'a, RotationalVelocity>,
+        WriteStorage<'a, Rotation>);
 
     fn run(&mut self, data: Self::SystemData) {
         use specs::Join;
 
-        for position in data.join() {
-            println!("Hello, {:?}", &position);
+        let (update_args, rotational_velocity, mut rotation) = data;
+
+        let delta = update_args.dt;
+
+        for (rotational_velocity, rotation) in (&rotational_velocity, &mut rotation).join() {
+            rotation.radians += rotational_velocity.radians * delta;
+            if(rotation.radians > 2.0 * PI) {
+                rotation.radians = 0.0;
+            }
         }
     }
 }
 
-struct UpdatePositionSystem;
+struct RenderSystem;
 
-impl<'a> System<'a> for UpdatePositionSystem {
-    type SystemData = (Fetch<'a, DeltaTime>,
-        ReadStorage<'a, Velocity>,
-        WriteStorage<'a, Position>);
+impl<'a> System<'a> for RenderSystem {
+    type SystemData = (FetchMut<'a, GlGraphics>,
+        Fetch<'a, RenderArgs>,
+        ReadStorage<'a, Rotation>,
+        ReadStorage<'a, Sprite>);
 
     fn run(&mut self, data: Self::SystemData) {
         use specs::Join;
+        use graphics::*;
 
-        let (delta, vel, mut pos) = data;
+        let (mut gl, render_args, rotation, sprite) = data;
 
-        let delta = delta.0.num_milliseconds() as f64;
+        let white = [1.0, 1.0, 1.0, 1.0];
+        gl.draw(render_args.viewport(), |context, gl| {
+            graphics::clear(white, gl);
 
-        for (vel, pos) in (&vel, &mut pos).join() {
-            pos.x += vel.x * delta;
-            pos.y += vel.y * delta;
-        }
+            for (rotation, sprite) in (&rotation, &sprite).join() {
+                let transform = context.transform.rot_rad(rotation.radians);
+
+                sprite.image.draw(&sprite.texture, &draw_state::DrawState::default(), transform, gl);
+            }
+        });
     }
 }
-
-struct DeltaTime(time::Duration);
 
 fn main() {
+    let opengl = OpenGL::V3_2;
+
+    let mut window: Window = WindowSettings::new(
+        "spinning_tux",
+        [800, 600]
+    )
+    .opengl(opengl)
+    .exit_on_esc(true)
+    .build()
+    .unwrap();
+
+    let gl = GlGraphics::new(opengl);
+
     let mut world = World::new();
-    world.register::<Position>();
-    world.register::<Velocity>();
-    world.add_resource(DeltaTime(time::Duration::from_std(std::time::Duration::new(0, 0)).unwrap()));
+    world.register::<Rotation>();
+    world.register::<RotationalVelocity>();
+    world.register::<Sprite>();
+    world.add_resource(gl);
 
-    let ball = world.create_entity()
-        .with(Position {x: 4.0, y: 7.0})
-        .with(Velocity {x: 0.5, y: 0.5})
+    let texture = Texture::from_path(path::Path::new("Tux.png")).unwrap();
+
+    let tux = world.create_entity()
+        .with(Rotation {
+            radians: 0.0
+        })
+        .with(RotationalVelocity {
+            radians: 2.0
+        })
+        .with(Sprite {
+            image: graphics::Image::new().rect(graphics::rectangle::square(100.0, 100.0, 145.0)),
+            texture: texture
+        })
         .build();
 
-    let mut logging_system = LoggingSystem;
-    let mut update_position_system = UpdatePositionSystem;
+    let update_rotation_system = UpdateRotationSystem;
+    let render_system = RenderSystem;
 
-    let mut dispatcher = DispatcherBuilder::new()
-        .add(logging_system, "logging_system", &[])
-        .add(update_position_system, "update_position_system", &["logging_system"])
+    let mut update_dispatcher = DispatcherBuilder::new()
+        .add(update_rotation_system, "update_position_system", &[])
         .build();
 
-    let sleep_duration = std::time::Duration::from_millis(1000);
-    let mut last_update = std::time::SystemTime::now();
-    loop {
-        {
-            let mut delta = world.write_resource::<DeltaTime>();
-            let last_update_elapsed = last_update.elapsed().unwrap();
-            println!("{:?}", last_update_elapsed);
-            *delta = DeltaTime(time::Duration::from_std(last_update_elapsed).unwrap());
+    let mut render_dispatcher = DispatcherBuilder::new()
+        .add_thread_local(render_system)
+        .build();
+
+    let mut events = Events::new(EventSettings::new());
+    while let Some(e) = events.next(&mut window) {
+        match e {
+            Input::Update(args) => {
+                world.add_resource(args);
+                update_dispatcher.dispatch(&mut world.res);
+            },
+            Input::Render(args) => {
+                world.add_resource(args);
+                render_dispatcher.dispatch(&mut world.res);
+            },
+            _ => ()
         }
-
-        dispatcher.dispatch(&mut world.res);
-        last_update = std::time::SystemTime::now();
-        thread::sleep(sleep_duration);
     }
+    // loop {
+    //     {
+    //         let mut delta = world.write_resource::<DeltaTime>();
+    //         let last_update_elapsed = last_update.elapsed().unwrap();
+    //         println!("{:?}", last_update_elapsed);
+    //         *delta = DeltaTime(time::Duration::from_std(last_update_elapsed).unwrap());
+    //     }
+    //
+    //     dispatcher.dispatch(&mut world.res);
+    //     last_update = std::time::SystemTime::now();
+    //     thread::sleep(sleep_duration);
+    // }
 }
