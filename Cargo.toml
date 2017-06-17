@@ -1,0 +1,6 @@
+[package]
+name = "game_dev"
+version = "0.1.0"
+authors = ["Dan"]
+
+[dependencies]
