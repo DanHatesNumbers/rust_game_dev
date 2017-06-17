@@ -154,16 +154,4 @@ fn main() {
             _ => ()
         }
     }
-    // loop {
-    //     {
-    //         let mut delta = world.write_resource::<DeltaTime>();
-    //         let last_update_elapsed = last_update.elapsed().unwrap();
-    //         println!("{:?}", last_update_elapsed);
-    //         *delta = DeltaTime(time::Duration::from_std(last_update_elapsed).unwrap());
-    //     }
-    //
-    //     dispatcher.dispatch(&mut world.res);
-    //     last_update = std::time::SystemTime::now();
-    //     thread::sleep(sleep_duration);
-    // }
 }
