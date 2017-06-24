@@ -133,7 +133,7 @@ fn main() {
     let render_system = RenderSystem;
 
     let mut update_dispatcher = DispatcherBuilder::new()
-        .add(update_rotation_system, "update_position_system", &[])
+        .add(update_rotation_system, "update_rotation_system", &[])
         .build();
 
     let mut render_dispatcher = DispatcherBuilder::new()
