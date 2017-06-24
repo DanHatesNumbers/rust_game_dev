@@ -1,0 +1,7 @@
+{
+    "version": "0.0.1",
+    "command": "cargo",
+    "isShellCommand": true,
+    "args": ["build"],
+    "showOutput": "always"
+}

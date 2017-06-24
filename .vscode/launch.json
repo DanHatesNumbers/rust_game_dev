@@ -10,7 +10,8 @@
             "cwd": "${workspaceRoot}",
             "sourceLanguages": [
                 "rust"
-            ]
+            ],
+            "preLaunchTask": "cargo"
         }
     ]
 }
