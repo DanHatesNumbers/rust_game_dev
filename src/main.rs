@@ -142,16 +142,13 @@ fn main() {
 
     let mut events = Events::new(EventSettings::new());
     while let Some(e) = events.next(&mut window) {
-        match e {
-            Input::Update(args) => {
-                world.add_resource(args);
-                update_dispatcher.dispatch(&mut world.res);
-            },
-            Input::Render(args) => {
-                world.add_resource(args);
-                render_dispatcher.dispatch(&mut world.res);
-            },
-            _ => ()
+        if let Some(u) = e.update_args() {
+            world.add_resource(u);
+            update_dispatcher.dispatch(&mut world.res);
+        }
+        if let Some(r) = e.render_args() {
+            world.add_resource(r);
+            render_dispatcher.dispatch(&mut world.res);
         }
     }
 }
