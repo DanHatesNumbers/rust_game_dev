@@ -14,6 +14,14 @@ use piston::input::*;
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{GlGraphics, OpenGL, Texture};
 
+struct Player {
+    input_intents: Vec<InputIntents>
+}
+
+impl Component for Player {
+    type Storage = VecStorage<Player>;
+}
+
 #[derive(Debug)]
 struct Rotation {
     radians: f64
@@ -41,6 +49,100 @@ impl Component for Sprite {
     type Storage = VecStorage<Sprite>;
 }
 
+#[derive(Clone)]
+enum PressedStatus {
+    Pressed,
+    Released
+}
+
+#[derive(Clone)]
+struct ButtonStatus {
+    button: Button,
+    status: PressedStatus
+}
+
+impl Component for ButtonStatus {
+    type Storage = VecStorage<ButtonStatus>;
+}
+
+struct PendingUpdates(Vec<ButtonStatus>);
+
+#[derive(Clone)]
+enum InputIntents {
+    ChangeDirection(RotationDirection)
+}
+
+#[derive(Clone)]
+enum RotationDirection {
+    Clockwise,
+    CounterClockwise
+}
+
+struct InputHandlingSystem;
+
+impl<'a> System<'a> for InputHandlingSystem {
+    type SystemData = (FetchMut<'a, PendingUpdates>,
+        WriteStorage<'a, Player>);
+
+    fn run(&mut self, data: Self::SystemData) {
+        use piston::input::keyboard;
+        use specs::Join;
+
+        let (mut pending_updates, mut player_storage) = data;
+        let mut player = (&mut player_storage).join().next().unwrap();
+
+        for pending_update in &pending_updates.0 {
+            match pending_update.button {
+                Button::Keyboard(key) => {
+                    match key {
+                        Key::Left => {
+                            player.input_intents.push(InputIntents::ChangeDirection(RotationDirection::CounterClockwise));
+                        },
+                        Key::Right => {
+                            player.input_intents.push(InputIntents::ChangeDirection(RotationDirection::Clockwise));
+                        }
+                        _ => ()
+                    }
+                },
+                _ => ()
+            }
+        }
+
+        pending_updates.0.clear();
+    }
+}
+
+struct IntentProcessingSystem;
+
+impl<'a> System<'a> for IntentProcessingSystem {
+    type SystemData = (WriteStorage<'a, Player>,
+        WriteStorage<'a, RotationalVelocity>);
+
+    fn run(&mut self, data: Self::SystemData) {
+        use specs::Join;
+
+        let (mut player, mut rotational_velocity) = data;
+
+        for (mut player, mut rotational_velocity) in (&mut player, &mut rotational_velocity).join() {
+            for intent in &player.input_intents {
+                match *intent {
+                    InputIntents::ChangeDirection(ref direction) => {
+                        match *direction {
+                            RotationDirection::Clockwise => {
+                                rotational_velocity.radians = rotational_velocity.radians.abs();
+                            },
+                            RotationDirection::CounterClockwise => {
+                                rotational_velocity.radians = 0.0 - rotational_velocity.radians.abs();
+                            }
+                        }
+                    }
+                }
+            }
+            player.input_intents.clear();
+        }
+    }
+}
+
 struct UpdateRotationSystem;
 
 impl<'a> System<'a> for UpdateRotationSystem {
@@ -57,9 +159,6 @@ impl<'a> System<'a> for UpdateRotationSystem {
 
         for (rotational_velocity, rotation) in (&rotational_velocity, &mut rotation).join() {
             rotation.radians += rotational_velocity.radians * delta;
-            if(rotation.radians > 2.0 * PI) {
-                rotation.radians = 0.0;
-            }
         }
     }
 }
@@ -112,7 +211,9 @@ fn main() {
     world.register::<Rotation>();
     world.register::<RotationalVelocity>();
     world.register::<Sprite>();
+    world.register::<Player>();
     world.add_resource(gl);
+    world.add_resource(PendingUpdates(Vec::new()));
 
     let texture = Texture::from_path(path::Path::new("Tux.png")).unwrap();
 
@@ -127,13 +228,20 @@ fn main() {
             image: graphics::Image::new().rect(graphics::rectangle::square(0.0, 0.0, 145.0)),
             texture: texture
         })
+        .with(Player {
+            input_intents: Vec::new()
+        })
         .build();
 
+    let input_handling_system = InputHandlingSystem;
+    let intent_processing_system = IntentProcessingSystem;
     let update_rotation_system = UpdateRotationSystem;
     let render_system = RenderSystem;
 
     let mut update_dispatcher = DispatcherBuilder::new()
-        .add(update_rotation_system, "update_rotation_system", &[])
+        .add(input_handling_system, "input_handling_system", &[])
+        .add(intent_processing_system, "intent_processing_system", &["input_handling_system"])
+        .add(update_rotation_system, "update_rotation_system", &["intent_processing_system"])
         .build();
 
     let mut render_dispatcher = DispatcherBuilder::new()
@@ -142,6 +250,14 @@ fn main() {
 
     let mut events = Events::new(EventSettings::new());
     while let Some(e) = events.next(&mut window) {
+        if let Some(p) = e.press_args() {
+            let mut pending_updates = world.write_resource::<PendingUpdates>();
+            pending_updates.0.push(ButtonStatus {button: p, status: PressedStatus::Pressed});
+        }
+        if let Some(r) = e.release_args() {
+            let mut pending_updates = world.write_resource::<PendingUpdates>();
+            pending_updates.0.push(ButtonStatus {button: r, status: PressedStatus::Released});
+        }
         if let Some(u) = e.update_args() {
             world.add_resource(u);
             update_dispatcher.dispatch(&mut world.res);
